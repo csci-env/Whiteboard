@@ -32,13 +32,14 @@ const extension: JupyterFrontEndPlugin<void> = {
         });
 
         // Add the command to the palette
-        palette.addItem({ command, args: {}, category: 'Extension Examples' });
+        palette.addItem({ command, category: 'Extension Examples' });
 
         // Add the widget to the launcher
         launcher.add({
             command: command,
             category: 'Other',
             rank: 0,
+            //iconClass: 'jp-WhiteboardIcon'
         });
     }
 };
@@ -47,10 +48,7 @@ export default extension;
 
 class WhiteboardWidget extends Widget {
     private context: CanvasRenderingContext2D | null;
-    private isDrawing: boolean = false;
-    private lastX: number = 0;
-    private lastY: number = 0;
-    private eraserMode: boolean = false; // Initialize with a default value
+    private eraserMode!: boolean; // Use non-null assertion operator
 
     constructor() {
         super();
@@ -59,10 +57,38 @@ class WhiteboardWidget extends Widget {
         this.title.label = 'Whiteboard';
         this.title.closable = true;
 
-        // Create a canvas element for drawing
+        // Create the toolbar
+        const toolbar = document.createElement('div');
+        toolbar.className = 'whiteboard-toolbar';
+        toolbar.style.display = 'flex';
+        toolbar.style.flexDirection = 'row';
+
+        // Add color buttons to the toolbar
+        const colors = ['black', 'red', 'green', 'blue'];
+        colors.forEach((color) => {
+            const colorButton = document.createElement('button');
+            colorButton.className = 'color-button';
+            colorButton.style.backgroundColor = color;
+            colorButton.addEventListener('click', () => this.setColor(color));
+            colorButton.style.fontSize = '16px'; // Adjust the font size as desired
+            colorButton.style.padding = '8px 12px'; // Add some padding to make the buttons visually bigger
+            toolbar.appendChild(colorButton);
+        });
+
+        // Add eraser button to the toolbar
+        const eraserButton = document.createElement('button');
+        eraserButton.textContent = 'Eraser';
+        eraserButton.className = 'eraser-button';
+        eraserButton.addEventListener('click', () => (this.eraserMode = !this.eraserMode));
+        eraserButton.style.fontSize = '16px'; // Adjust the font size as desired
+        eraserButton.style.padding = '8px 12px'; // Add some padding to make the button visually bigger
+        toolbar.appendChild(eraserButton);
+
+        // Insert the toolbar before the canvas
         const canvas = document.createElement('canvas');
         canvas.width = 1800;
-        canvas.height = 1000;
+        canvas.height = 1600;
+        this.node.appendChild(toolbar);
         this.node.appendChild(canvas);
 
         // Get the 2D rendering context of the canvas
@@ -71,51 +97,62 @@ class WhiteboardWidget extends Widget {
             this.context.strokeStyle = 'black';
             this.context.lineWidth = 2;
 
+            let isDrawing = false;
+            let lastX = 0;
+            let lastY = 0;
+
+            // Helper function to start drawing
+            const startDrawing = (event: MouseEvent) => {
+                isDrawing = true;
+                [lastX, lastY] = [event.offsetX, event.offsetY];
+            };
+
+            // Helper function to draw
+            const draw = (event: MouseEvent) => {
+                if (!isDrawing) return;
+                if (this.context === null) return;
+
+                if (this.eraserMode) {
+                    this.context.clearRect(
+                        event.offsetX - 10,
+                        event.offsetY - 10,
+                        20,
+                        20
+                    );
+                } else {
+                    this.context.beginPath();
+                    this.context.moveTo(lastX, lastY);
+                    this.context.lineTo(event.offsetX, event.offsetY);
+                    this.context.stroke();
+                    [lastX, lastY] = [event.offsetX, event.offsetY];
+                }
+            };
+
+            // Helper function to stop drawing
+            const stopDrawing = () => {
+                isDrawing = false;
+            };
+
             // Add event listeners for drawing on the canvas
-            canvas.addEventListener('mousedown', this.startDrawing.bind(this));
-            canvas.addEventListener('mousemove', this.draw.bind(this));
-            canvas.addEventListener('mouseup', this.stopDrawing.bind(this));
-            canvas.addEventListener('mouseout', this.stopDrawing.bind(this));
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
 
             // Add event listener for toggling eraser mode
-            canvas.addEventListener('dblclick', this.toggleEraserMode.bind(this));
+            canvas.addEventListener('dblclick', () => {
+                this.eraserMode = !this.eraserMode;
+            });
         }
     }
 
-    private startDrawing(event: MouseEvent) {
-        this.isDrawing = true;
-        [this.lastX, this.lastY] = [event.offsetX, event.offsetY];
-    }
-
-    private draw(event: MouseEvent) {
-        if (!this.isDrawing) return;
-        if (this.context === null) return;
-
+    // Helper function to set the current color
+    private setColor(color: string) {
         if (this.eraserMode) {
-            this.context.clearRect(
-                event.offsetX - 10,
-                event.offsetY - 10,
-                20,
-                20
-            );
-        } else {
-            this.context.beginPath();
-            this.context.moveTo(this.lastX, this.lastY);
-            this.context.lineTo(event.offsetX, event.offsetY);
-            this.context.stroke();
-            [this.lastX, this.lastY] = [event.offsetX, event.offsetY];
+            this.eraserMode = false;
         }
-    }
-
-    private stopDrawing() {
-        this.isDrawing = false;
-    }
-
-    private toggleEraserMode() {
-        if (this.context !== null) {
-            this.eraserMode = !this.eraserMode;
-            this.context.lineCap = this.eraserMode ? 'square' : 'round';
+        if (this.context) {
+            this.context.strokeStyle = color;
         }
     }
 }
-
