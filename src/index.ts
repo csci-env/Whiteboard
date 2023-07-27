@@ -39,7 +39,6 @@ const extension: JupyterFrontEndPlugin<void> = {
             command: command,
             category: 'Other',
             rank: 0,
-            //iconClass: 'jp-WhiteboardIcon'
         });
     }
 };
@@ -48,7 +47,15 @@ export default extension;
 
 class WhiteboardWidget extends Widget {
     private context: CanvasRenderingContext2D | null;
-    private eraserMode!: boolean; // Use non-null assertion operator
+    private eraserMode: boolean;
+
+    private setInitialActiveColor() {
+        const defaultColor = 'black';
+        this.setActiveColor(defaultColor);
+        if (this.context) {
+            this.context.strokeStyle = defaultColor;
+        }
+    }
 
     constructor() {
         super();
@@ -56,6 +63,8 @@ class WhiteboardWidget extends Widget {
         this.id = 'whiteboard-widget';
         this.title.label = 'Whiteboard';
         this.title.closable = true;
+
+        this.eraserMode = false; // Initialize the eraserMode
 
         // Create the toolbar
         const toolbar = document.createElement('div');
@@ -79,7 +88,7 @@ class WhiteboardWidget extends Widget {
         const eraserButton = document.createElement('button');
         eraserButton.textContent = 'Eraser';
         eraserButton.className = 'eraser-button';
-        eraserButton.addEventListener('click', () => (this.eraserMode = !this.eraserMode));
+        eraserButton.addEventListener('click', () => this.toggleEraserMode());
         eraserButton.style.fontSize = '16px'; // Adjust the font size as desired
         eraserButton.style.padding = '8px 12px'; // Add some padding to make the button visually bigger
         toolbar.appendChild(eraserButton);
@@ -141,18 +150,67 @@ class WhiteboardWidget extends Widget {
 
             // Add event listener for toggling eraser mode
             canvas.addEventListener('dblclick', () => {
-                this.eraserMode = !this.eraserMode;
+                this.toggleEraserMode();
             });
         }
+
+        // Set the initial active color (default color as black)
+        this.setInitialActiveColor();
+    }
+
+    private setActiveColor(color: string) {
+        const colorButtons = this.node.querySelectorAll('.color-button');
+        colorButtons.forEach((button: Element) => {
+            if (button instanceof HTMLElement) {
+                const buttonColor = button.style.backgroundColor;
+                if (buttonColor === color) {
+                    button.classList.add('active'); // Add the active class to the selected color button
+                } else {
+                    button.classList.remove('active'); // Remove the active class from other color buttons
+                }
+            }
+        });
     }
 
     // Helper function to set the current color
     private setColor(color: string) {
         if (this.eraserMode) {
             this.eraserMode = false;
+            this.setEraserMode(false); // Update the eraser button style
         }
+
         if (this.context) {
             this.context.strokeStyle = color;
         }
+
+        this.setActiveColor(color); // Update the active class for the color buttons
+    }
+
+    private setEraserMode(active: boolean) {
+        this.eraserMode = active;
+        const eraserButton = this.node.querySelector('.eraser-button');
+        if (eraserButton instanceof HTMLElement) {
+            if (active) {
+                eraserButton.classList.add('active'); // Add the active class to indicate eraser mode
+            } else {
+                eraserButton.classList.remove('active'); // Remove the active class when eraser mode is off
+            }
+        }
+    }
+
+    private toggleEraserMode() {
+        this.setEraserMode(!this.eraserMode);
     }
 }
+
+// Add CSS styles for the active buttons
+const style = document.createElement('style');
+style.textContent = `
+.whiteboard-toolbar .color-button.active,
+.whiteboard-toolbar .eraser-button.active {
+    border: 2px solid #000; /* Add your desired highlight border style */
+    border-radius: 50%; /* Add your desired border radius to create a circle effect */
+}
+`;
+
+document.head.appendChild(style);
