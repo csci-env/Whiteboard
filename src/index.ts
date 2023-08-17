@@ -1,15 +1,19 @@
-import {
-    JupyterFrontEnd,
-    JupyterFrontEndPlugin
-} from '@jupyterlab/application';
-
+import { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
 import { ICommandPalette } from '@jupyterlab/apputils';
 import { ILauncher } from '@jupyterlab/launcher';
 import { Widget } from '@lumino/widgets';
 
-/**
- * Activate the whiteboard extension.
- */
+// Define the Shape interface
+interface Shape {
+    type: 'arrow' | 'rectangle';
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    color: string;
+    timestamp: number;
+}
+
 const extension: JupyterFrontEndPlugin<void> = {
     id: '@jupyterlab-examples/whiteboard:plugin',
     autoStart: true,
@@ -27,14 +31,14 @@ const extension: JupyterFrontEndPlugin<void> = {
             caption: 'Open a whiteboard to draw on',
             execute: () => {
                 const whiteboardWidget = new WhiteboardWidget();
+                const color = whiteboardWidget.getCurrentColorFromToolbar();
+                whiteboardWidget.setColor(color);
                 shell.add(whiteboardWidget, 'main');
             }
         });
 
-        // Add the command to the palette
         palette.addItem({ command, category: 'Extension Examples' });
 
-        // Add the widget to the launcher
         launcher.add({
             command: command,
             category: 'Other',
@@ -47,7 +51,29 @@ export default extension;
 
 class WhiteboardWidget extends Widget {
     private context: CanvasRenderingContext2D | null;
+    private shapeType: 'arrow' | 'rectangle' | null;
+    private startShapeX: number;
+    private startShapeY: number;
+    private savedShapes: Shape[];
+    private handDrawnShapes: { type: 'drawing'; points: { x: number; y: number }[]; color: string; lineWidth: number; timestamp: number }[];
+    private currentDrawingPoints: { x: number; y: number }[];
+    private isDrawing: boolean;
     private eraserMode: boolean;
+    private penColorBeforeEraser: string | null = null;
+
+    private setActiveColor(color: string) {
+        const colorButtons = this.node.querySelectorAll('.color-button');
+        colorButtons.forEach((button: Element) => {
+            if (button instanceof HTMLElement) {
+                const buttonColor = button.style.backgroundColor;
+                if (buttonColor === color) {
+                    button.classList.add('active');
+                } else {
+                    button.classList.remove('active');
+                }
+            }
+        });
+    }
 
     private setInitialActiveColor() {
         const defaultColor = 'black';
@@ -64,152 +90,347 @@ class WhiteboardWidget extends Widget {
         this.title.label = 'Whiteboard';
         this.title.closable = true;
 
-        this.eraserMode = false; // Initialize the eraserMode
+        this.shapeType = null;
+        this.startShapeX = 0;
+        this.startShapeY = 0;
+        this.savedShapes = [];
+        this.handDrawnShapes = [];
+        this.currentDrawingPoints = [];
+        this.isDrawing = false;
+        this.eraserMode = false;
 
-        // Create the toolbar
         const toolbar = document.createElement('div');
         toolbar.className = 'whiteboard-toolbar';
         toolbar.style.display = 'flex';
         toolbar.style.flexDirection = 'row';
 
-        // Add color buttons to the toolbar
         const colors = ['black', 'red', 'green', 'blue'];
         colors.forEach((color) => {
             const colorButton = document.createElement('button');
             colorButton.className = 'color-button';
             colorButton.style.backgroundColor = color;
             colorButton.addEventListener('click', () => this.setColor(color));
-            colorButton.style.fontSize = '16px'; // Adjust the font size as desired
-            colorButton.style.padding = '8px 12px'; // Add some padding to make the buttons visually bigger
+            colorButton.style.fontSize = '16px';
+            colorButton.style.padding = '8px 12px';
             toolbar.appendChild(colorButton);
         });
 
-        // Add eraser button to the toolbar
+        const arrowButton = document.createElement('button');
+        arrowButton.textContent = 'Arrow';
+        arrowButton.className = 'shape-button';
+        arrowButton.addEventListener('click', () => this.toggleShapeMode('arrow'));
+        arrowButton.style.fontSize = '16px';
+        arrowButton.style.padding = '8px 12px';
+        toolbar.appendChild(arrowButton);
+
+        const rectangleButton = document.createElement('button');
+        rectangleButton.textContent = 'Rectangle';
+        rectangleButton.className = 'shape-button';
+        rectangleButton.addEventListener('click', () => this.toggleShapeMode('rectangle'));
+        rectangleButton.style.fontSize = '16px';
+        rectangleButton.style.padding = '8px 12px';
+        toolbar.appendChild(rectangleButton);
+
         const eraserButton = document.createElement('button');
         eraserButton.textContent = 'Eraser';
         eraserButton.className = 'eraser-button';
         eraserButton.addEventListener('click', () => this.toggleEraserMode());
-        eraserButton.style.fontSize = '16px'; // Adjust the font size as desired
-        eraserButton.style.padding = '8px 12px'; // Add some padding to make the button visually bigger
+        eraserButton.style.fontSize = '16px';
+        eraserButton.style.padding = '8px 12px';
         toolbar.appendChild(eraserButton);
 
-        // Insert the toolbar before the canvas
         const canvas = document.createElement('canvas');
         canvas.width = 1800;
         canvas.height = 1600;
         this.node.appendChild(toolbar);
         this.node.appendChild(canvas);
 
-        // Get the 2D rendering context of the canvas
         this.context = canvas.getContext('2d');
         if (this.context !== null) {
             this.context.strokeStyle = 'black';
             this.context.lineWidth = 2;
 
-            let isDrawing = false;
-            let lastX = 0;
-            let lastY = 0;
-
-            // Helper function to start drawing
-            const startDrawing = (event: MouseEvent) => {
-                isDrawing = true;
-                [lastX, lastY] = [event.offsetX, event.offsetY];
-            };
-
-            // Helper function to draw
-            const draw = (event: MouseEvent) => {
-                if (!isDrawing) return;
-                if (this.context === null) return;
-
-                if (this.eraserMode) {
-                    this.context.clearRect(
-                        event.offsetX - 10,
-                        event.offsetY - 10,
-                        20,
-                        20
-                    );
-                } else {
-                    this.context.beginPath();
-                    this.context.moveTo(lastX, lastY);
-                    this.context.lineTo(event.offsetX, event.offsetY);
-                    this.context.stroke();
-                    [lastX, lastY] = [event.offsetX, event.offsetY];
-                }
-            };
-
-            // Helper function to stop drawing
-            const stopDrawing = () => {
-                isDrawing = false;
-            };
-
-            // Add event listeners for drawing on the canvas
-            canvas.addEventListener('mousedown', startDrawing);
-            canvas.addEventListener('mousemove', draw);
-            canvas.addEventListener('mouseup', stopDrawing);
-            canvas.addEventListener('mouseout', stopDrawing);
-
-            // Add event listener for toggling eraser mode
-            canvas.addEventListener('dblclick', () => {
-                this.toggleEraserMode();
-            });
+            canvas.addEventListener('mousedown', this.startDrawing);
+            canvas.addEventListener('mousemove', this.draw);
+            canvas.addEventListener('mouseup', this.stopDrawing);
+            canvas.addEventListener('mouseout', this.stopDrawing);
         }
 
-        // Set the initial active color (default color as black)
         this.setInitialActiveColor();
     }
 
-    private setActiveColor(color: string) {
-        const colorButtons = this.node.querySelectorAll('.color-button');
-        colorButtons.forEach((button: Element) => {
+    public getCurrentColorFromToolbar(): string {
+        const activeColorButton = this.node.querySelector('.color-button.active') as HTMLElement;
+        return activeColorButton ? activeColorButton.style.backgroundColor : 'black';
+    }
+
+    public setColor(color: string) {
+        if (this.context) {
+            this.context.strokeStyle = color;
+        }
+
+        this.eraserMode = false;
+        const eraserButton = this.node.querySelector('.eraser-button');
+
+        if (eraserButton instanceof HTMLElement && this.context) {
+            if (this.eraserMode) {
+                eraserButton.classList.add('active');
+                this.context.lineWidth = 20; // Set larger line width for eraser mode
+            } else {
+                eraserButton.classList.remove('active');
+                this.context.lineWidth = 2; // Restore original line width
+            }
+        }
+
+        this.setActiveColor(color);
+    }
+
+    private toggleShapeMode(shapeType: 'arrow' | 'rectangle') {
+        if (this.shapeType === shapeType) {
+            this.shapeType = null;
+            this.setActiveShape(null); // Deactivate the active shape button
+        } else {
+            this.shapeType = shapeType;
+            this.setActiveShape(shapeType); // Activate the clicked shape button
+            this.eraserMode = false;
+            const eraserButton = this.node.querySelector('.eraser-button');
+            if (eraserButton) {
+                eraserButton.classList.remove('active');
+            }
+        }
+    }
+
+    private setActiveShape(shapeType: 'arrow' | 'rectangle' | null) {
+        const shapeButtons = this.node.querySelectorAll('.shape-button');
+        shapeButtons.forEach((button: Element) => {
             if (button instanceof HTMLElement) {
-                const buttonColor = button.style.backgroundColor;
-                if (buttonColor === color) {
-                    button.classList.add('active'); // Add the active class to the selected color button
+                const buttonShapeType = button.textContent?.toLowerCase();
+                if (buttonShapeType === shapeType) {
+                    button.classList.toggle('active', true);
                 } else {
-                    button.classList.remove('active'); // Remove the active class from other color buttons
+                    button.classList.toggle('active', false);
                 }
             }
         });
     }
 
-    // Helper function to set the current color
-    private setColor(color: string) {
+    private startDrawing = (event: MouseEvent) => {
+        this.isDrawing = true;
+        this.startShapeX = event.offsetX;
+        this.startShapeY = event.offsetY;
+        this.currentDrawingPoints.push({ x: event.offsetX, y: event.offsetY });
+    };
+
+    private draw = (event: MouseEvent) => {
+        if (!this.isDrawing) return;
+        if (this.context === null) return;
+
         if (this.eraserMode) {
-            this.eraserMode = false;
-            this.setEraserMode(false); // Update the eraser button style
-        }
+            this.context.beginPath();
+            this.context.moveTo(this.currentDrawingPoints[this.currentDrawingPoints.length - 1].x, this.currentDrawingPoints[this.currentDrawingPoints.length - 1].y);
+            this.context.lineTo(event.offsetX, event.offsetY);
+            //this.context.strokeStyle = 'white';
+            //this.context.stroke();
+            this.context.clearRect(
+                event.offsetX - 10,
+                event.offsetY - 10,
+                20,
+                20
+            );
+            this.currentDrawingPoints.push({ x: event.offsetX, y: event.offsetY });
+        } else if (this.shapeType) {
+            // Draw shapes (arrow or rectangle)
+            const endX = event.offsetX;
+            const endY = event.offsetY;
+            this.context.clearRect(0, 0, this.context.canvas.width, this.context.canvas.height);
+            this.drawSavedShapes();
 
-        if (this.context) {
-            this.context.strokeStyle = color;
-        }
+            const color = this.getCurrentColorFromToolbar();
 
-        this.setActiveColor(color); // Update the active class for the color buttons
+            if (this.shapeType === 'arrow') {
+                this.drawArrow(this.startShapeX, this.startShapeY, endX, endY, color);
+            } else if (this.shapeType === 'rectangle') {
+                this.drawRectangle(this.startShapeX, this.startShapeY, endX, endY, color);
+            }
+        } else {
+            // Draw freehand drawing
+            this.context.beginPath();
+            this.context.moveTo(this.currentDrawingPoints[this.currentDrawingPoints.length - 1].x, this.currentDrawingPoints[this.currentDrawingPoints.length - 1].y);
+            this.context.lineTo(event.offsetX, event.offsetY);
+            this.context.stroke();
+            this.currentDrawingPoints.push({ x: event.offsetX, y: event.offsetY });
+        }
+    };
+
+    private stopDrawing = (event: MouseEvent) => {
+        if (this.isDrawing) {
+            this.isDrawing = false;
+            const endX = event.offsetX;
+            const endY = event.offsetY;
+
+            if (this.shapeType) {
+                // Save shapes
+                const color = this.getCurrentColorFromToolbar();
+                const timestamp = Date.now(); // Add timestamp
+
+                if (this.shapeType === 'arrow') {
+                    this.savedShapes.push({
+                        type: 'arrow',
+                        startX: this.startShapeX,
+                        startY: this.startShapeY,
+                        endX,
+                        endY,
+                        color,
+                        timestamp,
+                    });
+                } else if (this.shapeType === 'rectangle') {
+                    this.savedShapes.push({
+                        type: 'rectangle',
+                        startX: this.startShapeX,
+                        startY: this.startShapeY,
+                        endX,
+                        endY,
+                        color,
+                        timestamp,
+                    });
+                }
+
+                this.setActiveShape(null);
+            }
+            else if (this.eraserMode) {
+                const color = 'white';
+                const timestamp = Date.now(); // Add timestamp
+
+                this.handDrawnShapes.push({
+                    type: 'drawing',
+                    points: this.currentDrawingPoints,
+                    color,
+                    lineWidth: this.context!.lineWidth,
+                    timestamp,
+                });
+
+            }
+            else {
+                // Save freehand drawing
+                const color = this.getCurrentColorFromToolbar();
+                const timestamp = Date.now(); // Add timestamp
+
+                this.handDrawnShapes.push({
+                    type: 'drawing',
+                    points: this.currentDrawingPoints,
+                    color,
+                    lineWidth: this.context!.lineWidth,
+                    timestamp,
+                });
+            }
+
+            this.currentDrawingPoints = [];
+            this.shapeType = null;
+        }
+    };
+
+    // Helper functions for drawing arrow, rectangle, hand-drawn shapes, and erasing...
+    private drawArrow(startX: number, startY: number, endX: number, endY: number, color: string) {
+        if (!this.context) return;
+        this.context.beginPath();
+        this.context.moveTo(startX, startY);
+        this.context.lineTo(endX, endY);
+        const arrowAngle = Math.PI / 6;
+        const arrowLength = 15;
+        const angle = Math.atan2(endY - startY, endX - startX);
+        this.context.lineTo(
+            endX - arrowLength * Math.cos(angle - arrowAngle),
+            endY - arrowLength * Math.sin(angle - arrowAngle)
+        );
+        this.context.moveTo(endX, endY);
+        this.context.lineTo(
+            endX - arrowLength * Math.cos(angle + arrowAngle),
+            endY - arrowLength * Math.sin(angle + arrowAngle)
+        );
+        this.context.strokeStyle = color;
+
+        this.context.lineWidth = 2;
+        this.context.stroke();
     }
 
-    private setEraserMode(active: boolean) {
-        this.eraserMode = active;
-        const eraserButton = this.node.querySelector('.eraser-button');
-        if (eraserButton instanceof HTMLElement) {
-            if (active) {
-                eraserButton.classList.add('active'); // Add the active class to indicate eraser mode
-            } else {
-                eraserButton.classList.remove('active'); // Remove the active class when eraser mode is off
+    private drawRectangle(startX: number, startY: number, endX: number, endY: number, color: string) {
+        if (!this.context) return;
+        this.context.beginPath();
+        this.context.rect(startX, startY, endX - startX, endY - startY);
+        this.context.strokeStyle = color;
+
+        this.context.lineWidth = 2;
+        this.context.stroke();
+    }
+
+    private drawHandDrawn(points: { x: number; y: number }[], color: string, lineWidth: number) {
+        if (!this.context) return;
+
+        this.context.beginPath();
+        this.context.strokeStyle = color;
+        this.context.lineWidth = lineWidth;
+        this.context.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            this.context.lineTo(points[i].x, points[i].y);
+        }
+        this.context.stroke();
+    }
+
+    private drawSavedShapes() {
+        if (!this.context) return;
+
+        const allShapes = [...this.savedShapes, ...this.handDrawnShapes];
+        allShapes.sort((a, b) => a.timestamp - b.timestamp); // Sort by timestamp
+
+        for (const shape of allShapes) {
+            this.context.strokeStyle = shape.color;
+            if (shape.type === 'arrow') {
+                this.drawArrow(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
+            } else if (shape.type === 'rectangle') {
+                this.drawRectangle(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
+            } else if (shape.type === 'drawing') {
+                this.drawHandDrawn(shape.points, shape.color, shape.lineWidth);
             }
         }
     }
 
     private toggleEraserMode() {
-        this.setEraserMode(!this.eraserMode);
+        this.eraserMode = !this.eraserMode;
+        const eraserButton = this.node.querySelector('.eraser-button');
+
+        if (eraserButton instanceof HTMLElement && this.context) {
+            if (this.eraserMode) {
+                // Store the current pen color before entering eraser mode
+                if (typeof this.context.strokeStyle === 'string') {
+                    this.penColorBeforeEraser = this.context.strokeStyle;
+                } else {
+                    this.penColorBeforeEraser = 'black'; // Default color if context.strokeStyle is not a string
+                }
+
+                eraserButton.classList.add('active');
+                this.context.strokeStyle = 'white'; // Set color to white for eraser mode
+                this.context.lineWidth = 20; // Set larger line width for eraser mode
+                this.shapeType = null; // Deactivate any active shape mode
+                this.setActiveShape(null); // Deactivate the active shape button
+            } else {
+                if (this.penColorBeforeEraser) {
+                    this.context.strokeStyle = this.penColorBeforeEraser; // Restore pen color
+                }
+
+                eraserButton.classList.remove('active');
+                this.context.lineWidth = 2; // Restore original line width
+            }
+        }
     }
 }
 
-// Add CSS styles for the active buttons
 const style = document.createElement('style');
 style.textContent = `
 .whiteboard-toolbar .color-button.active,
-.whiteboard-toolbar .eraser-button.active {
-    border: 2px solid #000; /* Add your desired highlight border style */
-    border-radius: 50%; /* Add your desired border radius to create a circle effect */
+.whiteboard-toolbar .eraser-button.active,
+.whiteboard-toolbar .shape-button.active {
+    border: 2px solid #000;
+    border-radius: 50%;
 }
 `;
 
