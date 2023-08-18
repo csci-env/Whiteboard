@@ -83,6 +83,33 @@ class WhiteboardWidget extends Widget {
         }
     }
 
+    private loadShapesFromFile(event: Event) {
+        const fileInput = event.target as HTMLInputElement;
+        if (fileInput.files !== null) {
+            const file = fileInput.files[0];
+
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    if (event.target !== null) {
+                        const shapesData = event.target.result as string;
+                        const { savedShapes, handDrawnShapes } = JSON.parse(shapesData);
+
+                        // Clear the canvas before loading shapes
+                        if (this.context !== null) {
+                            this.context.clearRect(0, 0, this.context.canvas.width, this.context.canvas.height);
+                        }
+                        
+                        this.savedShapes = savedShapes;
+                        this.handDrawnShapes = handDrawnShapes;
+                        this.drawSavedShapes(); // Draw the loaded shapes
+                    }
+                };
+                reader.readAsText(file);
+            }
+        }
+    }
+
     constructor() {
         super();
         this.addClass('whiteboard-widget');
@@ -138,6 +165,51 @@ class WhiteboardWidget extends Widget {
         eraserButton.style.fontSize = '16px';
         eraserButton.style.padding = '8px 12px';
         toolbar.appendChild(eraserButton);
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.json';
+        fileInput.style.display = 'none'; // Hide the file input
+        fileInput.addEventListener('change', (event) => this.loadShapesFromFile(event));
+
+        const saveButton = document.createElement('button');
+        saveButton.textContent = 'Save';
+        saveButton.addEventListener('click', async () => {
+            const shapesData = JSON.stringify({
+                savedShapes: this.savedShapes,
+                handDrawnShapes: this.handDrawnShapes
+            });
+
+            const blob = new Blob([shapesData], { type: 'application/json' });
+
+            const options = {
+                types: [
+                    {
+                        description: 'JSON Files',
+                        accept: {
+                            'application/json': ['.json'],
+                        },
+                    },
+                ],
+            };
+
+            try {
+                const handle = await (window as any).showSaveFilePicker(options);
+                const writableStream = await handle.createWritable();
+                await writableStream.write(blob);
+                await writableStream.close();
+            } catch (error) {
+                console.error('Error saving file:', error);
+            }
+        });
+
+        const loadButton = document.createElement('button');
+        loadButton.textContent = 'Load';
+        loadButton.addEventListener('click', () => fileInput.click());
+
+        toolbar.appendChild(saveButton);
+        toolbar.appendChild(loadButton);
+        toolbar.appendChild(fileInput);
 
         const canvas = document.createElement('canvas');
         canvas.width = 1800;
@@ -229,7 +301,8 @@ class WhiteboardWidget extends Widget {
             this.context.beginPath();
             this.context.moveTo(this.currentDrawingPoints[this.currentDrawingPoints.length - 1].x, this.currentDrawingPoints[this.currentDrawingPoints.length - 1].y);
             this.context.lineTo(event.offsetX, event.offsetY);
-            //this.context.strokeStyle = 'white';
+            this.context.strokeStyle = 'white';
+            this.context.lineWidth = 20;
             //this.context.stroke();
             this.context.clearRect(
                 event.offsetX - 10,
@@ -257,6 +330,12 @@ class WhiteboardWidget extends Widget {
             this.context.beginPath();
             this.context.moveTo(this.currentDrawingPoints[this.currentDrawingPoints.length - 1].x, this.currentDrawingPoints[this.currentDrawingPoints.length - 1].y);
             this.context.lineTo(event.offsetX, event.offsetY);
+
+            // Update color and line width to match toolbar settings
+            const color = this.getCurrentColorFromToolbar();
+            this.context.strokeStyle = color;
+            this.context.lineWidth = 2;
+
             this.context.stroke();
             this.currentDrawingPoints.push({ x: event.offsetX, y: event.offsetY });
         }
