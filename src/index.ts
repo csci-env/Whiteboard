@@ -5,7 +5,7 @@ import { Widget } from '@lumino/widgets';
 
 // Define the Shape interface
 interface Shape {
-    type: 'arrow' | 'rectangle';
+    type: 'arrow' | 'rectangle' | 'line' | 'circle';
     startX: number;
     startY: number;
     endX: number;
@@ -51,7 +51,7 @@ export default extension;
 
 class WhiteboardWidget extends Widget {
     private context: CanvasRenderingContext2D | null;
-    private shapeType: 'arrow' | 'rectangle' | null;
+    private shapeType: 'arrow' | 'rectangle' | 'line' | 'circle' | null;
     private startShapeX: number;
     private startShapeY: number;
     private savedShapes: Shape[];
@@ -150,6 +150,15 @@ class WhiteboardWidget extends Widget {
         arrowButton.style.padding = '8px 12px';
         toolbar.appendChild(arrowButton);
 
+        const lineButton = document.createElement('button');
+        lineButton.textContent = 'Line';
+        lineButton.className = 'shape-button';
+        lineButton.addEventListener('click', () => this.toggleShapeMode('line'));
+        lineButton.style.fontSize = '16px';
+        lineButton.style.padding = '8px 12px';
+        toolbar.appendChild(lineButton);
+
+
         const rectangleButton = document.createElement('button');
         rectangleButton.textContent = 'Rectangle';
         rectangleButton.className = 'shape-button';
@@ -157,6 +166,15 @@ class WhiteboardWidget extends Widget {
         rectangleButton.style.fontSize = '16px';
         rectangleButton.style.padding = '8px 12px';
         toolbar.appendChild(rectangleButton);
+
+        const circleButton = document.createElement('button');
+        circleButton.textContent = 'Circle';
+        circleButton.className = 'shape-button';
+        circleButton.addEventListener('click', () => this.toggleShapeMode('circle'));
+        circleButton.style.fontSize = '16px';
+        circleButton.style.padding = '8px 12px';
+        toolbar.appendChild(circleButton);
+
 
         const eraserButton = document.createElement('button');
         eraserButton.textContent = 'Eraser';
@@ -257,7 +275,7 @@ class WhiteboardWidget extends Widget {
         this.setActiveColor(color);
     }
 
-    private toggleShapeMode(shapeType: 'arrow' | 'rectangle') {
+    private toggleShapeMode(shapeType: 'arrow' | 'rectangle' | 'line' | 'circle') {
         if (this.shapeType === shapeType) {
             this.shapeType = null;
             this.setActiveShape(null); // Deactivate the active shape button
@@ -272,7 +290,7 @@ class WhiteboardWidget extends Widget {
         }
     }
 
-    private setActiveShape(shapeType: 'arrow' | 'rectangle' | null) {
+    private setActiveShape(shapeType: 'arrow' | 'rectangle' | 'line' | 'circle' | null) {
         const shapeButtons = this.node.querySelectorAll('.shape-button');
         shapeButtons.forEach((button: Element) => {
             if (button instanceof HTMLElement) {
@@ -324,7 +342,14 @@ class WhiteboardWidget extends Widget {
                 this.drawArrow(this.startShapeX, this.startShapeY, endX, endY, color);
             } else if (this.shapeType === 'rectangle') {
                 this.drawRectangle(this.startShapeX, this.startShapeY, endX, endY, color);
+            } else if (this.shapeType === 'line') {
+                // Draw line
+                this.drawLine(this.startShapeX, this.startShapeY, event.offsetX, event.offsetY, color);
+            } else if (this.shapeType === 'circle') {
+                // Draw circle
+                this.drawCircle(this.startShapeX, this.startShapeY, event.offsetX, event.offsetY, color);
             }
+
         } else {
             // Draw freehand drawing
             this.context.beginPath();
@@ -365,6 +390,26 @@ class WhiteboardWidget extends Widget {
                 } else if (this.shapeType === 'rectangle') {
                     this.savedShapes.push({
                         type: 'rectangle',
+                        startX: this.startShapeX,
+                        startY: this.startShapeY,
+                        endX,
+                        endY,
+                        color,
+                        timestamp,
+                    });
+                } else if (this.shapeType === 'line') {
+                    this.savedShapes.push({
+                        type: 'line',
+                        startX: this.startShapeX,
+                        startY: this.startShapeY,
+                        endX,
+                        endY,
+                        color,
+                        timestamp,
+                    });
+                } else if (this.shapeType === 'circle') {
+                    this.savedShapes.push({
+                        type: 'circle',
                         startX: this.startShapeX,
                         startY: this.startShapeY,
                         endX,
@@ -442,6 +487,28 @@ class WhiteboardWidget extends Widget {
         this.context.stroke();
     }
 
+    private drawLine(startX: number, startY: number, endX: number, endY: number, color: string) {
+        if (!this.context) return;
+        this.context.beginPath();
+        this.context.moveTo(startX, startY);
+        this.context.lineTo(endX, endY);
+        this.context.strokeStyle = color;
+
+        this.context.lineWidth = 2;
+        this.context.stroke();
+    }
+
+    private drawCircle(centerX: number, centerY: number, endX: number, endY: number, color: string) {
+        if (!this.context) return;
+        const radius = Math.sqrt((endX - centerX) ** 2 + (endY - centerY) ** 2);
+        this.context.beginPath();
+        this.context.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+        this.context.strokeStyle = color;
+
+        this.context.lineWidth = 2;
+        this.context.stroke();
+    }
+
     private drawHandDrawn(points: { x: number; y: number }[], color: string, lineWidth: number) {
         if (!this.context) return;
 
@@ -467,6 +534,10 @@ class WhiteboardWidget extends Widget {
                 this.drawArrow(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
             } else if (shape.type === 'rectangle') {
                 this.drawRectangle(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
+            } else if (shape.type === 'line') {
+                this.drawLine(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
+            } else if (shape.type === 'circle') {
+                this.drawCircle(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
             } else if (shape.type === 'drawing') {
                 this.drawHandDrawn(shape.points, shape.color, shape.lineWidth);
             }
