@@ -12,6 +12,7 @@ interface Shape {
     endY: number;
     color: string;
     timestamp: number;
+    globalAlpha: number;
 }
 
 const extension: JupyterFrontEndPlugin<void> = {
@@ -55,7 +56,7 @@ class WhiteboardWidget extends Widget {
     private startShapeX: number;
     private startShapeY: number;
     private savedShapes: Shape[];
-    private handDrawnShapes: { type: 'drawing'; points: { x: number; y: number }[]; color: string; lineWidth: number; timestamp: number }[];
+    private handDrawnShapes: { type: 'drawing'; points: { x: number; y: number }[]; color: string; lineWidth: number; timestamp: number; globalAlpha: number }[];
     private currentDrawingPoints: { x: number; y: number }[];
     private isDrawing: boolean;
     private eraserMode: boolean;
@@ -99,7 +100,7 @@ class WhiteboardWidget extends Widget {
                         if (this.context !== null) {
                             this.context.clearRect(0, 0, this.context.canvas.width, this.context.canvas.height);
                         }
-                        
+
                         this.savedShapes = savedShapes;
                         this.handDrawnShapes = handDrawnShapes;
                         this.drawSavedShapes(); // Draw the loaded shapes
@@ -131,14 +132,21 @@ class WhiteboardWidget extends Widget {
         toolbar.style.display = 'flex';
         toolbar.style.flexDirection = 'row';
 
-        const colors = ['black', 'red', 'green', 'blue'];
+        const colors = ['black', 'red', 'green', 'blue', 'cyan', 'magenta', 'yellow'];
         colors.forEach((color) => {
             const colorButton = document.createElement('button');
             colorButton.className = 'color-button';
+            colorButton.classList.add(color); // Add the color as a class
             colorButton.style.backgroundColor = color;
             colorButton.addEventListener('click', () => this.setColor(color));
             colorButton.style.fontSize = '16px';
             colorButton.style.padding = '8px 12px';
+
+            // Adjust the width for cyan, magenta, and yellow buttons
+            if (color === 'cyan' || color === 'magenta' || color === 'yellow') {
+                colorButton.style.width = '40px'; // Adjust the width as needed
+            }
+
             toolbar.appendChild(colorButton);
         });
 
@@ -158,7 +166,6 @@ class WhiteboardWidget extends Widget {
         lineButton.style.padding = '8px 12px';
         toolbar.appendChild(lineButton);
 
-
         const rectangleButton = document.createElement('button');
         rectangleButton.textContent = 'Rectangle';
         rectangleButton.className = 'shape-button';
@@ -174,7 +181,6 @@ class WhiteboardWidget extends Widget {
         circleButton.style.fontSize = '16px';
         circleButton.style.padding = '8px 12px';
         toolbar.appendChild(circleButton);
-
 
         const eraserButton = document.createElement('button');
         eraserButton.textContent = 'Eraser';
@@ -239,6 +245,7 @@ class WhiteboardWidget extends Widget {
         if (this.context !== null) {
             this.context.strokeStyle = 'black';
             this.context.lineWidth = 2;
+            this.context.globalAlpha = 1.0;
 
             canvas.addEventListener('mousedown', this.startDrawing);
             canvas.addEventListener('mousemove', this.draw);
@@ -266,14 +273,22 @@ class WhiteboardWidget extends Widget {
             if (this.eraserMode) {
                 eraserButton.classList.add('active');
                 this.context.lineWidth = 20; // Set larger line width for eraser mode
+                this.context.globalAlpha = 1.0;
             } else {
                 eraserButton.classList.remove('active');
-                this.context.lineWidth = 2; // Restore original line width
+                if (color === 'cyan' || color === 'magenta' || color === 'yellow') {
+                    this.context.lineWidth = 10; // Set line width to 10 for these colors
+                    this.context.globalAlpha = 0.25; // Set globalAlpha to 0.25 for these colors
+                } else {
+                    this.context.lineWidth = 2;
+                    this.context.globalAlpha = 1.0; 
+                }
             }
         }
 
         this.setActiveColor(color);
     }
+
 
     private toggleShapeMode(shapeType: 'arrow' | 'rectangle' | 'line' | 'circle') {
         if (this.shapeType === shapeType) {
@@ -321,6 +336,7 @@ class WhiteboardWidget extends Widget {
             this.context.lineTo(event.offsetX, event.offsetY);
             this.context.strokeStyle = 'white';
             this.context.lineWidth = 20;
+            this.context.globalAlpha = 1.0;
             //this.context.stroke();
             this.context.clearRect(
                 event.offsetX - 10,
@@ -337,17 +353,18 @@ class WhiteboardWidget extends Widget {
             this.drawSavedShapes();
 
             const color = this.getCurrentColorFromToolbar();
+            const globalAlpha = this.context.globalAlpha;
 
             if (this.shapeType === 'arrow') {
-                this.drawArrow(this.startShapeX, this.startShapeY, endX, endY, color);
+                this.drawArrow(this.startShapeX, this.startShapeY, endX, endY, color, globalAlpha);
             } else if (this.shapeType === 'rectangle') {
-                this.drawRectangle(this.startShapeX, this.startShapeY, endX, endY, color);
+                this.drawRectangle(this.startShapeX, this.startShapeY, endX, endY, color, globalAlpha);
             } else if (this.shapeType === 'line') {
                 // Draw line
-                this.drawLine(this.startShapeX, this.startShapeY, event.offsetX, event.offsetY, color);
+                this.drawLine(this.startShapeX, this.startShapeY, event.offsetX, event.offsetY, color, globalAlpha);
             } else if (this.shapeType === 'circle') {
                 // Draw circle
-                this.drawCircle(this.startShapeX, this.startShapeY, event.offsetX, event.offsetY, color);
+                this.drawCircle(this.startShapeX, this.startShapeY, event.offsetX, event.offsetY, color, globalAlpha);
             }
 
         } else {
@@ -359,7 +376,13 @@ class WhiteboardWidget extends Widget {
             // Update color and line width to match toolbar settings
             const color = this.getCurrentColorFromToolbar();
             this.context.strokeStyle = color;
-            this.context.lineWidth = 2;
+            if (color === 'cyan' || color === 'magenta' || color === 'yellow') {
+                this.context.lineWidth = 10; // Set line width to 10 for these colors
+                this.context.globalAlpha = 0.25; // Set globalAlpha to 0.25 for these colors
+            } else {
+                this.context.lineWidth = 2;
+                this.context.globalAlpha = 1.0;
+            }
 
             this.context.stroke();
             this.currentDrawingPoints.push({ x: event.offsetX, y: event.offsetY });
@@ -386,6 +409,7 @@ class WhiteboardWidget extends Widget {
                         endY,
                         color,
                         timestamp,
+                        globalAlpha: this.context!.globalAlpha,
                     });
                 } else if (this.shapeType === 'rectangle') {
                     this.savedShapes.push({
@@ -396,6 +420,7 @@ class WhiteboardWidget extends Widget {
                         endY,
                         color,
                         timestamp,
+                        globalAlpha: this.context!.globalAlpha,
                     });
                 } else if (this.shapeType === 'line') {
                     this.savedShapes.push({
@@ -406,6 +431,7 @@ class WhiteboardWidget extends Widget {
                         endY,
                         color,
                         timestamp,
+                        globalAlpha: this.context!.globalAlpha,
                     });
                 } else if (this.shapeType === 'circle') {
                     this.savedShapes.push({
@@ -416,6 +442,7 @@ class WhiteboardWidget extends Widget {
                         endY,
                         color,
                         timestamp,
+                        globalAlpha: this.context!.globalAlpha,
                     });
                 }
 
@@ -431,6 +458,7 @@ class WhiteboardWidget extends Widget {
                     color,
                     lineWidth: this.context!.lineWidth,
                     timestamp,
+                    globalAlpha: this.context!.globalAlpha,
                 });
 
             }
@@ -445,6 +473,7 @@ class WhiteboardWidget extends Widget {
                     color,
                     lineWidth: this.context!.lineWidth,
                     timestamp,
+                    globalAlpha: this.context!.globalAlpha,
                 });
             }
 
@@ -454,7 +483,7 @@ class WhiteboardWidget extends Widget {
     };
 
     // Helper functions for drawing arrow, rectangle, hand-drawn shapes, and erasing...
-    private drawArrow(startX: number, startY: number, endX: number, endY: number, color: string) {
+    private drawArrow(startX: number, startY: number, endX: number, endY: number, color: string, globalAlpha: number) {
         if (!this.context) return;
         this.context.beginPath();
         this.context.moveTo(startX, startY);
@@ -473,48 +502,75 @@ class WhiteboardWidget extends Widget {
         );
         this.context.strokeStyle = color;
 
-        this.context.lineWidth = 2;
+        if (color === 'cyan' || color === 'magenta' || color === 'yellow') {
+            this.context.lineWidth = 10; // Set line width to 10 for these colors
+            this.context.globalAlpha = 0.25; // Set globalAlpha to 0.25 for these colors
+        } else {
+            this.context.lineWidth = 2;
+            this.context.globalAlpha = 1.0; 
+        }
         this.context.stroke();
     }
 
-    private drawRectangle(startX: number, startY: number, endX: number, endY: number, color: string) {
+    private drawRectangle(startX: number, startY: number, endX: number, endY: number, color: string, globalAlpha: number) {
         if (!this.context) return;
         this.context.beginPath();
         this.context.rect(startX, startY, endX - startX, endY - startY);
         this.context.strokeStyle = color;
 
-        this.context.lineWidth = 2;
+        if (color === 'cyan' || color === 'magenta' || color === 'yellow') {
+            this.context.lineWidth = 10; // Set line width to 10 for these colors
+            this.context.globalAlpha = 0.25; // Set globalAlpha to 0.25 for these colors
+        } else {
+            this.context.lineWidth = 2;
+            this.context.globalAlpha = 1.0;
+        }
         this.context.stroke();
     }
 
-    private drawLine(startX: number, startY: number, endX: number, endY: number, color: string) {
+    private drawLine(startX: number, startY: number, endX: number, endY: number, color: string, globalAlpha: number) {
         if (!this.context) return;
         this.context.beginPath();
         this.context.moveTo(startX, startY);
         this.context.lineTo(endX, endY);
         this.context.strokeStyle = color;
 
-        this.context.lineWidth = 2;
+        if (color === 'cyan' || color === 'magenta' || color === 'yellow') {
+            this.context.lineWidth = 10; // Set line width to 10 for these colors
+            this.context.globalAlpha = 0.25; // Set globalAlpha to 0.25 for these colors
+        } else {
+            this.context.lineWidth = 2;
+            this.context.globalAlpha = 1.0;
+        }
         this.context.stroke();
     }
 
-    private drawCircle(centerX: number, centerY: number, endX: number, endY: number, color: string) {
+    private drawCircle(centerX: number, centerY: number, endX: number, endY: number, color: string, globalAlpha: number) {
         if (!this.context) return;
         const radius = Math.sqrt((endX - centerX) ** 2 + (endY - centerY) ** 2);
         this.context.beginPath();
         this.context.arc(centerX, centerY, radius, 0, 2 * Math.PI);
         this.context.strokeStyle = color;
 
-        this.context.lineWidth = 2;
+        if (color === 'cyan' || color === 'magenta' || color === 'yellow') {
+            this.context.lineWidth = 10; // Set line width to 10 for these colors
+            this.context.globalAlpha = 0.25; // Set globalAlpha to 0.25 for these colors
+        } else {
+            this.context.lineWidth = 2;
+            this.context.globalAlpha = 1.0;
+        }
         this.context.stroke();
     }
 
-    private drawHandDrawn(points: { x: number; y: number }[], color: string, lineWidth: number) {
+    private drawHandDrawn(points: { x: number; y: number }[], color: string, lineWidth: number, globalAlpha: number) {
         if (!this.context) return;
 
         this.context.beginPath();
         this.context.strokeStyle = color;
         this.context.lineWidth = lineWidth;
+        if (typeof globalAlpha === 'number') {
+            this.context.globalAlpha = globalAlpha; // Set globalAlpha if provided
+        }
         this.context.moveTo(points[0].x, points[0].y);
         for (let i = 1; i < points.length; i++) {
             this.context.lineTo(points[i].x, points[i].y);
@@ -530,16 +586,18 @@ class WhiteboardWidget extends Widget {
 
         for (const shape of allShapes) {
             this.context.strokeStyle = shape.color;
+            this.context.globalAlpha = shape.globalAlpha || 1.0; // Use the stored globalAlpha if available, otherwise default to 1.0
+
             if (shape.type === 'arrow') {
-                this.drawArrow(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
+                this.drawArrow(shape.startX, shape.startY, shape.endX, shape.endY, shape.color, shape.globalAlpha);
             } else if (shape.type === 'rectangle') {
-                this.drawRectangle(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
+                this.drawRectangle(shape.startX, shape.startY, shape.endX, shape.endY, shape.color, shape.globalAlpha);
             } else if (shape.type === 'line') {
-                this.drawLine(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
+                this.drawLine(shape.startX, shape.startY, shape.endX, shape.endY, shape.color, shape.globalAlpha);
             } else if (shape.type === 'circle') {
-                this.drawCircle(shape.startX, shape.startY, shape.endX, shape.endY, shape.color);
+                this.drawCircle(shape.startX, shape.startY, shape.endX, shape.endY, shape.color, shape.globalAlpha);
             } else if (shape.type === 'drawing') {
-                this.drawHandDrawn(shape.points, shape.color, shape.lineWidth);
+                this.drawHandDrawn(shape.points, shape.color, shape.lineWidth, shape.globalAlpha);
             }
         }
     }
@@ -560,6 +618,7 @@ class WhiteboardWidget extends Widget {
                 eraserButton.classList.add('active');
                 this.context.strokeStyle = 'white'; // Set color to white for eraser mode
                 this.context.lineWidth = 20; // Set larger line width for eraser mode
+                this.context.globalAlpha = 1.0;
                 this.shapeType = null; // Deactivate any active shape mode
                 this.setActiveShape(null); // Deactivate the active shape button
             } else {
@@ -569,6 +628,7 @@ class WhiteboardWidget extends Widget {
 
                 eraserButton.classList.remove('active');
                 this.context.lineWidth = 2; // Restore original line width
+                this.context.globalAlpha = 1.0;
             }
         }
     }
