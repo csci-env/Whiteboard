@@ -15,6 +15,15 @@ interface Shape {
     globalAlpha: number;
 }
 
+type HandDrawnShape = {
+    type: 'drawing';
+    points: { x: number; y: number }[];
+    color: string;
+    lineWidth: number;
+    timestamp: number;
+    globalAlpha: number;
+};
+
 const extension: JupyterFrontEndPlugin<void> = {
     id: '@jupyterlab-examples/whiteboard:plugin',
     autoStart: true,
@@ -61,6 +70,8 @@ class WhiteboardWidget extends Widget {
     private isDrawing: boolean;
     private eraserMode: boolean;
     private penColorBeforeEraser: string | null = null;
+    //private removedShape: Shape | HandDrawnShape | null = null;
+    private removedShapesHistory: (Shape | HandDrawnShape)[] = [];
 
     private setActiveColor(color: string) {
         const colorButtons = this.node.querySelectorAll('.color-button');
@@ -190,6 +201,19 @@ class WhiteboardWidget extends Widget {
         eraserButton.style.padding = '8px 12px';
         toolbar.appendChild(eraserButton);
 
+        const undoButton = document.createElement('button');
+        undoButton.textContent = 'Undo';
+        undoButton.addEventListener('click', () => this.removeShapeWithHighestTimestamp());
+
+        const redoButton = document.createElement('button');
+        redoButton.textContent = 'Redo';
+        redoButton.className = 'redo-button'; // Add a class for easier targeting
+        redoButton.addEventListener('click', () => this.restoreRemovedShape());
+        redoButton.style.backgroundColor = '#9b9d9e'; // Initial background color
+
+        toolbar.appendChild(undoButton);
+        toolbar.appendChild(redoButton);
+
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = '.json';
@@ -281,14 +305,13 @@ class WhiteboardWidget extends Widget {
                     this.context.globalAlpha = 0.25; // Set globalAlpha to 0.25 for these colors
                 } else {
                     this.context.lineWidth = 2;
-                    this.context.globalAlpha = 1.0; 
+                    this.context.globalAlpha = 1.0;
                 }
             }
         }
 
         this.setActiveColor(color);
     }
-
 
     private toggleShapeMode(shapeType: 'arrow' | 'rectangle' | 'line' | 'circle') {
         if (this.shapeType === shapeType) {
@@ -324,6 +347,10 @@ class WhiteboardWidget extends Widget {
         this.startShapeX = event.offsetX;
         this.startShapeY = event.offsetY;
         this.currentDrawingPoints.push({ x: event.offsetX, y: event.offsetY });
+
+        // Clear the array of removed shapes when drawing starts
+        this.removedShapesHistory = [];
+        this.updateRedoButtonStyle(); // Update the redo button style
     };
 
     private draw = (event: MouseEvent) => {
@@ -482,6 +509,68 @@ class WhiteboardWidget extends Widget {
         }
     };
 
+    private removeShapeWithHighestTimestamp() {
+        const shapes = [...this.savedShapes, ...this.handDrawnShapes];
+        if (shapes.length > 0) {
+            const highestTimestampShape = shapes.reduce((prev, current) => (current.timestamp > prev.timestamp ? current : prev));
+            this.removedShapesHistory.push(highestTimestampShape); // Add the removed shape to history
+            this.removeShapeFromLists(highestTimestampShape);
+            this.clearCanvasAndRedraw();
+            this.updateRedoButtonStyle(); // Update the redo button style
+        }
+    }
+
+    private updateRedoButtonStyle() {
+        const redoButton = this.node.querySelector('.redo-button') as HTMLElement;
+        if (!redoButton) return;
+
+        if (this.removedShapesHistory.length === 0) {
+            redoButton.style.backgroundColor = '#9b9d9e';
+        } else {
+            redoButton.style.backgroundColor = ''; // Reset to default
+        }
+    }
+
+    private restoreRemovedShape() {
+        if (this.removedShapesHistory.length > 0) {
+            const lastRemovedShape = this.removedShapesHistory.pop();
+            if (lastRemovedShape) {
+                this.addShapeToLists(lastRemovedShape);
+                this.clearCanvasAndRedraw();
+                this.updateRedoButtonStyle(); // Update the redo button style
+            }
+        }
+    }
+
+    private removeShapeFromLists(shape: Shape | { type: 'drawing'; points: { x: number; y: number }[]; color: string; lineWidth: number; timestamp: number; globalAlpha: number }) {
+        if ('type' in shape && shape.type === 'drawing') {
+            const index = this.handDrawnShapes.findIndex(s => s === shape);
+            if (index !== -1) {
+                this.handDrawnShapes.splice(index, 1);
+            }
+        } else {
+            const index = this.savedShapes.findIndex(s => s === shape);
+            if (index !== -1) {
+                this.savedShapes.splice(index, 1);
+            }
+        }
+    }
+
+    private addShapeToLists(shape: Shape | { type: 'drawing'; points: { x: number; y: number }[]; color: string; lineWidth: number; timestamp: number; globalAlpha: number }) {
+        if ('type' in shape && shape.type === 'drawing') {
+            this.handDrawnShapes.push(shape);
+        } else {
+            this.savedShapes.push(shape);
+        }
+    }
+
+    private clearCanvasAndRedraw() {
+        if (this.context) {
+            this.context.clearRect(0, 0, this.context.canvas.width, this.context.canvas.height);
+            this.drawSavedShapes();
+        }
+    }
+
     // Helper functions for drawing arrow, rectangle, hand-drawn shapes, and erasing...
     private drawArrow(startX: number, startY: number, endX: number, endY: number, color: string, globalAlpha: number) {
         if (!this.context) return;
@@ -507,7 +596,7 @@ class WhiteboardWidget extends Widget {
             this.context.globalAlpha = 0.25; // Set globalAlpha to 0.25 for these colors
         } else {
             this.context.lineWidth = 2;
-            this.context.globalAlpha = 1.0; 
+            this.context.globalAlpha = 1.0;
         }
         this.context.stroke();
     }
