@@ -1,6 +1,4 @@
 # Whiteboard
-This is just the src/index.ts
+The most important file of note is src/index.ts, that is the main code for the whiteboard jupyterlab extension
 
-The whiteboard can be seen in the launcher and double click to swich between pen and eraser. 
-
-This README is a placeholder.
+The whiteboard can be seen in the launcher.  
